@@ -1,0 +1,10 @@
+{
+  "yahoo_timeout": 30,
+  "yahoo_retry_count": 3,
+  "yahoo_delay": 0.1,
+  "max_tickers": 50,
+  "auto_clean_data": true,
+  "remove_outliers": true,
+  "fill_missing_data": "제거",
+  "data_validation": true
+}

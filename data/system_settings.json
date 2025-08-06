@@ -1,0 +1,10 @@
+{
+  "layout": "wide",
+  "sidebar_state": "expanded",
+  "theme": "light",
+  "language": "한국어",
+  "cache_enabled": true,
+  "cache_ttl": 30,
+  "parallel_processing": true,
+  "max_workers": 4
+}
