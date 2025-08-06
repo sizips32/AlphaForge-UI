@@ -3,6 +3,7 @@ import streamlit_option_menu as option_menu
 from pages import data_management, factor_mining, dynamic_combination, backtesting, reporting, settings
 import utils.config as config
 import utils.styles as styles
+from utils.logger import setup_streamlit_logging, log_user_action, log_system_event
 
 # 페이지 설정
 st.set_page_config(
@@ -17,6 +18,9 @@ styles.apply_custom_styles()
 
 def main():
     """AlphaForge-UI 메인 애플리케이션"""
+    
+    # 로깅 초기화
+    setup_streamlit_logging()
     
     # 사이드바 네비게이션
     with st.sidebar:
@@ -56,18 +60,25 @@ def main():
     
     # 메인 콘텐츠 영역
     if selected == "📊 Dashboard":
+        log_user_action("dashboard_viewed")
         show_dashboard()
     elif selected == "📈 데이터 관리":
+        log_user_action("data_management_viewed")
         data_management.show_page()
     elif selected == "🧠 팩터 마이닝":
+        log_user_action("factor_mining_viewed")
         factor_mining.show_page()
     elif selected == "⚖️ 동적 결합":
+        log_user_action("dynamic_combination_viewed")
         dynamic_combination.show_page()
     elif selected == "📊 백테스팅":
+        log_user_action("backtesting_viewed")
         backtesting.show_page()
     elif selected == "📋 리포트":
+        log_user_action("reporting_viewed")
         reporting.show_page()
     elif selected == "⚙️ 설정":
+        log_user_action("settings_viewed")
         settings.show_page()
 
 def show_sidebar_info():

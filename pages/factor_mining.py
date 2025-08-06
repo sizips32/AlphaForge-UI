@@ -19,6 +19,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.config import FACTOR_SETTINGS
 from utils.factor_miner import FactorMiner
 from utils.performance_analyzer import PerformanceAnalyzer
+from utils.cache_utils import cached_factor_mining, get_data_hash, get_settings_hash
 
 def show_page():
     """팩터 마이닝 페이지를 표시합니다."""
@@ -456,12 +457,27 @@ def run_factor_mining(settings):
         progress_bar.progress(40)
         time.sleep(0.5)
         
-        # 4. 신경망 기반 팩터 생성 (70%)
+        # 4. 신경망 기반 팩터 생성 (70%) - 캐시 적용
         status_text.text("🧠 AI 기반 팩터 생성 중...")
         try:
-            ai_factors = miner.generate_ai_factors(data, basic_factors)
-            if not ai_factors:
-                raise ValueError("AI 팩터 생성 실패")
+            # 캐시 사용
+            data_hash = get_data_hash(data)
+            settings_hash = get_settings_hash(settings)
+            
+            # 캐시된 결과 조회 시도
+            try:
+                cached_result = cached_factor_mining(data_hash, settings_hash, data, settings)
+                if cached_result and 'factors' in cached_result:
+                    ai_factors = cached_result['factors']
+                    st.info("💾 캐시된 팩터 마이닝 결과를 사용합니다.")
+                else:
+                    raise ValueError("캐시 결과 없음")
+                    
+            except Exception:
+                # 캐시 실패시 직접 계산
+                ai_factors = miner.generate_ai_factors(data, basic_factors)
+                if not ai_factors:
+                    raise ValueError("AI 팩터 생성 실패")
         except Exception as e:
             raise ValueError(f"AI 팩터 생성 실패: {str(e)}")
         

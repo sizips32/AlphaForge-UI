@@ -3,21 +3,103 @@
 업로드된 데이터의 전처리 및 변환을 담당합니다.
 """
 
+import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import warnings
+from typing import Optional, Dict, List, Tuple, Any, Union
 warnings.filterwarnings('ignore')
+
+@st.cache_data(ttl=3600, show_spinner=True)
+def _cached_calculate_technical_indicators(data_hash: str, data: pd.DataFrame) -> pd.DataFrame:
+    """기술적 지표 계산을 캐시합니다."""
+    from ta import add_all_ta_features
+    from utils.performance_optimizer import performance_optimizer
+    
+    try:
+        # 메모리 최적화
+        ta_data = performance_optimizer.optimize_dataframe_memory(data.copy())
+        
+        # 대용량 데이터의 경우 병렬 처리
+        if len(ta_data) > 50000:  # 5만 행 이상일 때
+            def process_ticker_group(ticker_data: pd.DataFrame) -> pd.DataFrame:
+                if len(ticker_data) > 20 and all(col in ticker_data.columns for col in ['High', 'Low', 'Open', 'Volume']):
+                    try:
+                        return add_all_ta_features(
+                            ticker_data, 
+                            open="Open", high="High", low="Low", close="Close", volume="Volume",
+                            fillna=True
+                        )
+                    except Exception:
+                        return ticker_data
+                return ticker_data
+            
+            # 병렬 처리로 종목별 기술적 지표 계산
+            result = performance_optimizer.parallel_apply(ta_data, process_ticker_group, 'Ticker')
+        else:
+            # 일반적인 순차 처리
+            enhanced_data = []
+            for ticker in ta_data['Ticker'].unique():
+                ticker_data = ta_data[ta_data['Ticker'] == ticker].copy()
+                
+                if len(ticker_data) > 20:  # 충분한 데이터가 있을 때만
+                    # TA-Lib 대신 ta 라이브러리 사용
+                    if all(col in ticker_data.columns for col in ['High', 'Low', 'Open', 'Volume']):
+                        ticker_data = add_all_ta_features(
+                            ticker_data, 
+                            open="Open", high="High", low="Low", close="Close", volume="Volume",
+                            fillna=True
+                        )
+                
+                enhanced_data.append(ticker_data)
+            
+            result = pd.concat(enhanced_data, ignore_index=True)
+        
+        return result
+        
+    except ImportError:
+        # ta 라이브러리가 없으면 최적화된 기본 지표 계산 사용
+        return performance_optimizer.optimize_technical_indicators(data)
+    except Exception:
+        return data
+
+def _calculate_basic_indicators(data: pd.DataFrame) -> pd.DataFrame:
+    """기본 기술적 지표를 계산합니다."""
+    result = data.copy()
+    
+    for ticker in result['Ticker'].unique():
+        mask = result['Ticker'] == ticker
+        ticker_data = result.loc[mask, 'Close']
+        
+        if len(ticker_data) > 20:
+            # 단순 이동평균
+            result.loc[mask, 'SMA_20'] = ticker_data.rolling(20).mean()
+            result.loc[mask, 'SMA_50'] = ticker_data.rolling(50).mean()
+            
+            # 수익률
+            result.loc[mask, 'Returns'] = ticker_data.pct_change()
+            
+            # 변동성
+            result.loc[mask, 'Volatility_20'] = ticker_data.pct_change().rolling(20).std()
+    
+    return result.fillna(method='ffill', limit=5).fillna(0)
 
 class DataProcessor:
     """데이터 처리 클래스"""
     
-    def __init__(self):
-        self.processed_data = None
-        self.features = {}
+    def __init__(self) -> None:
+        self.processed_data: Optional[pd.DataFrame] = None
+        self.features: Dict[str, Any] = {}
     
-    def process_data(self, data):
+    def process_data(self, data: pd.DataFrame) -> pd.DataFrame:
         """데이터 전처리를 수행합니다."""
+        from utils.performance_optimizer import performance_optimizer
+        from utils.logger import log_performance
+        import time
+        
+        start_time = time.time()
+        
         try:
             # 입력 데이터 검증
             if data is None or data.empty:
@@ -29,40 +111,78 @@ class DataProcessor:
             if missing_columns:
                 raise ValueError(f"필수 컬럼이 누락되었습니다: {missing_columns}")
             
-            # 데이터 복사본 생성
-            processed = data.copy()
+            # 메모리 최적화 적용
+            processed = performance_optimizer.optimize_dataframe_memory(data.copy())
             
-            # 1. 기본 정리
-            processed = self._clean_data(processed)
+            # 대용량 데이터 처리를 위한 최적화된 프로세싱
+            if len(processed) > 100000:  # 10만 행 이상일 때 청크 처리
+                # 청크별로 전처리 수행
+                def process_chunk(chunk_data: pd.DataFrame) -> pd.DataFrame:
+                    # 1. 기본 정리
+                    chunk_data = self._clean_data(chunk_data)
+                    # 2. 날짜 처리
+                    chunk_data = self._process_dates(chunk_data)
+                    # 3. 가격 데이터 처리
+                    chunk_data = self._process_prices(chunk_data)
+                    # 4. 거래량 처리
+                    chunk_data = self._process_volume(chunk_data)
+                    return chunk_data
+                
+                processed = performance_optimizer.chunked_processing(
+                    processed, process_chunk, chunk_size=50000
+                )
+            else:
+                # 일반 처리
+                # 1. 기본 정리
+                processed = self._clean_data(processed)
+                # 2. 날짜 처리
+                processed = self._process_dates(processed)
+                # 3. 가격 데이터 처리
+                processed = self._process_prices(processed)
+                # 4. 거래량 처리
+                processed = self._process_volume(processed)
             
-            # 2. 날짜 처리
-            processed = self._process_dates(processed)
-            
-            # 3. 가격 데이터 처리
-            processed = self._process_prices(processed)
-            
-            # 4. 거래량 처리
-            processed = self._process_volume(processed)
-            
-            # 5. 기술적 지표 계산
-            processed = self._calculate_technical_indicators(processed)
+            # 5. 기술적 지표 계산 (이미 최적화됨)
+            from utils.cache_utils import get_data_hash
+            data_hash = get_data_hash(processed)
+            processed = _cached_calculate_technical_indicators(data_hash, processed)
             
             # 6. 팩터 계산
             processed = self._calculate_factors(processed)
+            
+            # 최종 메모리 최적화
+            processed = performance_optimizer.optimize_dataframe_memory(processed)
             
             # 최종 검증
             if processed is None or processed.empty:
                 raise ValueError("데이터 처리 후 결과가 비어있습니다.")
             
             self.processed_data = processed
+            
+            # 성능 로깅
+            duration = time.time() - start_time
+            log_performance('data_processing', duration, {
+                'rows': len(processed),
+                'columns': len(processed.columns),
+                'tickers': processed['Ticker'].nunique() if 'Ticker' in processed.columns else 0,
+                'optimization_applied': len(data) > 100000
+            })
+            
             return processed
             
         except Exception as e:
+            duration = time.time() - start_time
             error_msg = f"데이터 처리 중 오류 발생: {str(e)}"
             print(f"ERROR: {error_msg}")  # 콘솔 로깅
+            
+            log_performance('data_processing_error', duration, {
+                'error': error_msg,
+                'rows': len(data) if data is not None else 0
+            })
+            
             raise Exception(error_msg)
     
-    def _clean_data(self, data):
+    def _clean_data(self, data: pd.DataFrame) -> pd.DataFrame:
         """데이터 기본 정리를 수행합니다."""
         try:
             # 복사본 생성

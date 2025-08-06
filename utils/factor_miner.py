@@ -10,18 +10,19 @@ import torch.nn as nn
 import torch.optim as optim
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
+from typing import List, Dict, Tuple, Optional, Any, Union
 import warnings
 warnings.filterwarnings('ignore')
 
 class FactorMiner:
     """팩터 마이닝 클래스"""
     
-    def __init__(self, settings):
+    def __init__(self, settings: Dict[str, Any]) -> None:
         self.settings = settings
         self.scaler = StandardScaler()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
-    def generate_basic_factors(self, data):
+    def generate_basic_factors(self, data: pd.DataFrame) -> List[Dict[str, Any]]:
         """기본 팩터들을 생성합니다."""
         try:
             factors = []
@@ -68,7 +69,7 @@ class FactorMiner:
             print(f"ERROR in generate_basic_factors: {str(e)}")
             raise Exception(f"기본 팩터 생성 실패: {str(e)}")
     
-    def generate_ai_factors(self, data, basic_factors):
+    def generate_ai_factors(self, data: pd.DataFrame, basic_factors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """AI 기반 팩터를 생성합니다."""
         try:
             # 입력 검증
@@ -104,7 +105,7 @@ class FactorMiner:
             print(f"ERROR in generate_ai_factors: {str(e)}")
             raise Exception(f"AI 팩터 생성 실패: {str(e)}")
     
-    def _generate_momentum_factors(self, data):
+    def _generate_momentum_factors(self, data: pd.DataFrame) -> List[Dict[str, Any]]:
         """모멘텀 팩터를 생성합니다."""
         factors = []
         
@@ -133,7 +134,7 @@ class FactorMiner:
         
         return factors
     
-    def _generate_value_factors(self, data):
+    def _generate_value_factors(self, data: pd.DataFrame) -> List[Dict[str, Any]]:
         """밸류 팩터를 생성합니다."""
         factors = []
         
@@ -162,7 +163,7 @@ class FactorMiner:
         
         return factors
     
-    def _generate_quality_factors(self, data):
+    def _generate_quality_factors(self, data: pd.DataFrame) -> List[Dict[str, Any]]:
         """퀄리티 팩터를 생성합니다."""
         factors = []
         
@@ -190,7 +191,7 @@ class FactorMiner:
         
         return factors
     
-    def _generate_size_factors(self, data):
+    def _generate_size_factors(self, data: pd.DataFrame) -> List[Dict[str, Any]]:
         """사이즈 팩터를 생성합니다."""
         factors = []
         
@@ -218,7 +219,7 @@ class FactorMiner:
         
         return factors
     
-    def _generate_low_volatility_factors(self, data):
+    def _generate_low_volatility_factors(self, data: pd.DataFrame) -> List[Dict[str, Any]]:
         """저변동성 팩터를 생성합니다."""
         factors = []
         
@@ -246,7 +247,7 @@ class FactorMiner:
         
         return factors
     
-    def _create_neural_network(self, input_size):
+    def _create_neural_network(self, input_size: int) -> nn.Module:
         """신경망 모델을 생성합니다."""
         hidden_size = self.settings['neurons_per_layer']
         num_layers = self.settings['hidden_layers']
@@ -270,7 +271,7 @@ class FactorMiner:
         model = nn.Sequential(*layers)
         return model.to(self.device)
     
-    def _prepare_training_data(self, data, basic_factors):
+    def _prepare_training_data(self, data: pd.DataFrame, basic_factors: List[Dict[str, Any]]) -> Tuple[np.ndarray, np.ndarray]:
         """학습 데이터를 준비합니다."""
         # 기본 특성 선택
         feature_columns = ['Returns', 'Volatility_20d', 'RSI', 'MACD', 'BB_Position']
@@ -287,7 +288,7 @@ class FactorMiner:
         
         return X_scaled, y.values
     
-    def _train_model(self, model, X, y):
+    def _train_model(self, model: nn.Module, X: np.ndarray, y: np.ndarray) -> nn.Module:
         """모델을 학습합니다."""
         # 데이터 분할
         X_train, X_test, y_train, y_test = train_test_split(
@@ -317,7 +318,7 @@ class FactorMiner:
         
         return model
     
-    def _generate_ai_factors_from_model(self, model, data, basic_factors):
+    def _generate_ai_factors_from_model(self, model: nn.Module, data: pd.DataFrame, basic_factors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """학습된 모델로부터 AI 팩터를 생성합니다."""
         ai_factors = []
         

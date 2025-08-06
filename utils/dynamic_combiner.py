@@ -6,18 +6,19 @@
 import pandas as pd
 import numpy as np
 from scipy.optimize import minimize
+from typing import List, Dict, Any, Optional, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
 class DynamicCombiner:
     """동적 결합 클래스"""
     
-    def __init__(self, settings):
+    def __init__(self, settings: Dict[str, Any]) -> None:
         self.settings = settings
         self.weight_history = []
         self.factor_performance_history = []
     
-    def create_mega_alpha(self, data, factors):
+    def create_mega_alpha(self, data: pd.DataFrame, factors: List[Dict[str, Any]]) -> Dict[str, Any]:
         """메가-알파를 생성합니다."""
         try:
             # 입력 검증

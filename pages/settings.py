@@ -14,6 +14,9 @@ from datetime import datetime
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.config import UI_SETTINGS, DATA_VALIDATION
+from utils.env_manager import env_manager
+from utils.cache_utils import clear_all_caches, get_cache_info
+from utils.logger import show_log_viewer, analyze_logs
 
 def show_page():
     """설정 페이지를 표시합니다."""
@@ -21,8 +24,8 @@ def show_page():
     st.markdown("AlphaForge-UI의 시스템 설정을 관리합니다.")
     
     # 탭으로 설정 분류
-    settings_tab1, settings_tab2, settings_tab3, settings_tab4 = st.tabs([
-        "🔧 시스템 설정", "👤 사용자 설정", "📊 데이터 설정", "🔍 고급 설정"
+    settings_tab1, settings_tab2, settings_tab3, settings_tab4, settings_tab5, settings_tab6, settings_tab7 = st.tabs([
+        "🔧 시스템 설정", "👤 사용자 설정", "📊 데이터 설정", "🔍 고급 설정", "🔑 환경변수", "📋 로그", "⚡ 성능"
     ])
     
     with settings_tab1:
@@ -36,6 +39,15 @@ def show_page():
     
     with settings_tab4:
         show_advanced_settings()
+    
+    with settings_tab5:
+        show_environment_settings()
+    
+    with settings_tab6:
+        show_logging_settings()
+    
+    with settings_tab7:
+        show_performance_settings()
 
 def show_system_settings():
     """시스템 설정 섹션"""
@@ -502,6 +514,366 @@ def clear_all_data():
                     
     except Exception as e:
         st.error(f"데이터 초기화 중 오류가 발생했습니다: {str(e)}")
+
+def show_environment_settings():
+    """환경변수 설정 섹션"""
+    st.markdown("### 🔑 환경변수 설정")
+    
+    # 환경 설정 상태 표시
+    env_manager.show_environment_status()
+    
+    st.markdown("---")
+    
+    # 캐시 관리
+    st.subheader("💾 캐시 관리")
+    
+    # 캐시 정보 표시
+    cache_info = get_cache_info()
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("캐시 파일 수", cache_info['cache_count'])
+    with col2:
+        st.metric("캐시 크기", f"{cache_info['total_size_mb']} MB")
+    with col3:
+        st.metric("캐시 디렉토리", cache_info['cache_dir'])
+    
+    # 캐시 삭제 버튼
+    if st.button("🗑️ 모든 캐시 삭제", type="secondary"):
+        if clear_all_caches():
+            st.success("캐시가 성공적으로 삭제되었습니다.")
+            st.rerun()
+        else:
+            st.error("캐시 삭제 중 오류가 발생했습니다.")
+    
+    st.markdown("---")
+    
+    # .env 파일 안내
+    st.subheader("📝 환경설정 파일 (.env)")
+    
+    env_file = Path('.env')
+    template_file = Path('.env.template')
+    
+    if not env_file.exists():
+        st.warning("⚠️ .env 파일이 없습니다.")
+        
+        if template_file.exists():
+            st.info("""
+            📋 **설정 방법:**
+            
+            1. 터미널에서 다음 명령어 실행:
+            ```bash
+            cp .env.template .env
+            ```
+            
+            2. .env 파일을 편집하여 필요한 설정 입력
+            
+            3. AlphaForge-UI 재시작
+            """)
+        else:
+            st.error("❌ .env.template 파일도 없습니다. 개발자에게 문의하세요.")
+    else:
+        st.success("✅ .env 파일이 존재합니다.")
+        
+        with st.expander("📄 .env 파일 내용 보기"):
+            try:
+                with open(env_file, 'r', encoding='utf-8') as f:
+                    env_content = f.read()
+                
+                # 민감한 정보 마스킹
+                lines = env_content.split('\n')
+                masked_lines = []
+                
+                for line in lines:
+                    if '=' in line and not line.strip().startswith('#'):
+                        key, value = line.split('=', 1)
+                        if any(sensitive in key.upper() for sensitive in ['KEY', 'SECRET', 'PASSWORD', 'TOKEN']):
+                            masked_value = env_manager.mask_sensitive_value(value)
+                            masked_lines.append(f"{key}={masked_value}")
+                        else:
+                            masked_lines.append(line)
+                    else:
+                        masked_lines.append(line)
+                
+                st.code('\n'.join(masked_lines))
+                
+            except Exception as e:
+                st.error(f"파일을 읽을 수 없습니다: {e}")
+    
+    # 환경변수 예시
+    with st.expander("🔧 환경변수 설정 예시"):
+        st.code("""
+# API 키 설정
+YAHOO_FINANCE_API_KEY=your_api_key_here
+ALPHA_VANTAGE_API_KEY=your_api_key_here
+
+# 성능 설정
+MAX_WORKERS=4
+CACHE_TTL=3600
+
+# 로깅 설정
+LOG_LEVEL=INFO
+
+# 보안 설정
+SECRET_KEY=your_very_secure_secret_key_here
+        """, language='bash')
+
+def show_logging_settings():
+    """로깅 설정 섹션"""
+    st.markdown("### 📋 로깅 설정")
+    
+    # 로그 분석
+    st.subheader("📊 로그 분석")
+    
+    analysis_hours = st.selectbox(
+        "분석 기간 (시간)",
+        [1, 6, 24, 72, 168],  # 1시간, 6시간, 1일, 3일, 1주일
+        index=2  # 기본값: 24시간
+    )
+    
+    if st.button("🔍 로그 분석 실행"):
+        with st.spinner("로그 분석 중..."):
+            analysis = analyze_logs(analysis_hours)
+            
+            if 'error' in analysis:
+                st.error(f"로그 분석 실패: {analysis['error']}")
+            else:
+                # 분석 결과 표시
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("총 로그 수", analysis['total_entries'])
+                
+                with col2:
+                    error_count = analysis['levels'].get('ERROR', 0) + analysis['levels'].get('CRITICAL', 0)
+                    st.metric("에러 수", error_count)
+                
+                with col3:
+                    st.metric("성능 이슈", len(analysis['performance_issues']))
+                
+                with col4:
+                    st.metric("사용자 액션", len(analysis['user_actions']))
+                
+                # 로그 레벨별 분포
+                if analysis['levels']:
+                    st.subheader("📈 로그 레벨 분포")
+                    import plotly.express as px
+                    import pandas as pd
+                    
+                    levels_df = pd.DataFrame([
+                        {'Level': level, 'Count': count} 
+                        for level, count in analysis['levels'].items()
+                    ])
+                    
+                    fig = px.bar(levels_df, x='Level', y='Count', 
+                                title="로그 레벨별 분포")
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # 최근 에러 목록
+                if analysis['errors']:
+                    st.subheader("🚨 최근 에러")
+                    for error in analysis['errors'][-5:]:  # 최근 5개만
+                        with st.expander(f"❌ {error.get('timestamp', 'Unknown time')} - {error.get('level', 'ERROR')}"):
+                            st.json(error)
+                
+                # 성능 이슈
+                if analysis['performance_issues']:
+                    st.subheader("⚡ 성능 이슈")
+                    for issue in analysis['performance_issues'][-5:]:  # 최근 5개만
+                        duration = issue.get('extra', {}).get('duration_seconds', 0)
+                        operation = issue.get('extra', {}).get('operation', 'Unknown')
+                        st.warning(f"🐌 {operation}: {duration:.2f}초")
+    
+    st.markdown("---")
+    
+    # 로그 뷰어
+    show_log_viewer()
+    
+    st.markdown("---")
+    
+    # 로깅 설정
+    st.subheader("⚙️ 로깅 설정")
+    
+    logging_config = env_manager.get_logging_config()
+    
+    st.write("**현재 로깅 설정:**")
+    st.json(logging_config)
+    
+    st.info("""
+    📋 **로깅 설정 변경 방법:**
+    
+    .env 파일에서 다음 변수를 설정하세요:
+    
+    - `LOG_LEVEL`: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    - `LOG_FILE`: 로그 파일 경로 (예: logs/app.log)
+    
+    변경 후 앱을 재시작해주세요.
+    """)
+
+def show_performance_settings():
+    """성능 설정 섹션"""
+    st.markdown("### ⚡ 성능 모니터링 & 최적화")
+    
+    # 성능 최적화 상태
+    st.subheader("🔧 성능 최적화 설정")
+    
+    from utils.performance_optimizer import performance_optimizer
+    from utils.logger import analyze_logs
+    import multiprocessing
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # 현재 설정 표시
+        st.metric("최대 워커 수", performance_optimizer.max_workers)
+        st.metric("CPU 코어 수", multiprocessing.cpu_count())
+        st.metric("기본 청크 크기", f"{performance_optimizer.chunk_size:,}")
+        
+        # 워커 수 조정
+        new_workers = st.slider(
+            "최대 워커 수 조정",
+            min_value=1,
+            max_value=multiprocessing.cpu_count(),
+            value=performance_optimizer.max_workers,
+            help="병렬 처리에 사용할 최대 워커 수"
+        )
+        
+        if new_workers != performance_optimizer.max_workers:
+            if st.button("워커 수 적용"):
+                performance_optimizer.set_max_workers(new_workers)
+                st.success(f"워커 수가 {new_workers}개로 설정되었습니다!")
+                st.rerun()
+    
+    with col2:
+        # 청크 크기 조정
+        new_chunk_size = st.number_input(
+            "청크 크기 설정",
+            min_value=1000,
+            max_value=100000,
+            value=performance_optimizer.chunk_size,
+            step=5000,
+            help="대용량 데이터 처리 시 사용할 청크 크기"
+        )
+        
+        if new_chunk_size != performance_optimizer.chunk_size:
+            if st.button("청크 크기 적용"):
+                performance_optimizer.set_chunk_size(new_chunk_size)
+                st.success(f"청크 크기가 {new_chunk_size:,}로 설정되었습니다!")
+                st.rerun()
+    
+    st.markdown("---")
+    
+    # 성능 분석
+    st.subheader("📊 성능 분석")
+    
+    analysis_period = st.selectbox(
+        "분석 기간",
+        [1, 6, 24, 72],
+        index=2,
+        format_func=lambda x: f"{x}시간"
+    )
+    
+    if st.button("🔍 성능 분석 실행"):
+        with st.spinner("성능 분석 중..."):
+            analysis = analyze_logs(analysis_period)
+            
+            if 'error' in analysis:
+                st.error(f"분석 실패: {analysis['error']}")
+            else:
+                # 성능 메트릭 표시
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("총 연산 수", len(analysis.get('performance_issues', []) + 
+                                           [entry for entry in analysis.get('user_actions', []) 
+                                            if 'duration' in entry.get('extra', {})]))
+                
+                with col2:
+                    perf_issues = analysis.get('performance_issues', [])
+                    avg_duration = 0
+                    if perf_issues:
+                        durations = [issue.get('extra', {}).get('duration_seconds', 0) for issue in perf_issues]
+                        avg_duration = sum(durations) / len(durations) if durations else 0
+                    st.metric("평균 처리 시간", f"{avg_duration:.2f}초")
+                
+                with col3:
+                    slow_ops = len([issue for issue in perf_issues 
+                                  if issue.get('extra', {}).get('duration_seconds', 0) > 5.0])
+                    st.metric("느린 연산 수", slow_ops)
+                
+                with col4:
+                    memory_ops = len([entry for entry in analysis.get('user_actions', [])
+                                    if 'memory' in entry.get('extra', {}).get('operation', '').lower()])
+                    st.metric("메모리 최적화", memory_ops)
+                
+                # 성능 이슈 상세
+                if analysis.get('performance_issues'):
+                    st.subheader("🐌 성능 이슈")
+                    
+                    for issue in analysis['performance_issues'][-10:]:  # 최근 10개
+                        duration = issue.get('extra', {}).get('duration_seconds', 0)
+                        operation = issue.get('extra', {}).get('operation', 'Unknown')
+                        timestamp = issue.get('timestamp', 'Unknown')
+                        
+                        with st.expander(f"⚠️ {operation} - {duration:.2f}초 ({timestamp})"):
+                            st.json(issue)
+    
+    st.markdown("---")
+    
+    # 메모리 사용량 모니터링
+    st.subheader("💾 메모리 모니터링")
+    
+    if 'processed_data' in st.session_state:
+        data = st.session_state['processed_data']
+        memory_info = performance_optimizer.get_memory_usage(data)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("총 메모리", f"{memory_info['total_memory_mb']:.1f} MB")
+        with col2:
+            st.metric("데이터 행 수", f"{memory_info['rows']:,}")
+        with col3:
+            st.metric("행당 메모리", f"{memory_info['memory_per_row_bytes']:.0f} bytes")
+        
+        # 컬럼별 메모리 사용량
+        with st.expander("📋 컬럼별 메모리 상세"):
+            column_data = []
+            for col_name, col_info in memory_info['column_details'].items():
+                column_data.append({
+                    '컬럼': col_name,
+                    '메모리(MB)': f"{col_info['memory_mb']:.2f}",
+                    '데이터타입': col_info['dtype'],
+                    '고유값': col_info['unique_values'],
+                    '결측치': col_info['null_count']
+                })
+            
+            if column_data:
+                import pandas as pd
+                df_memory = pd.DataFrame(column_data)
+                st.dataframe(df_memory, use_container_width=True)
+    else:
+        st.info("📊 데이터를 업로드하면 메모리 사용량을 분석할 수 있습니다.")
+    
+    # 최적화 권장 사항
+    st.subheader("💡 최적화 권장 사항")
+    
+    recommendations = [
+        "🔹 **대용량 데이터**: 10만 행 이상의 데이터는 자동으로 청크 처리됩니다",
+        "🔹 **메모리 최적화**: 데이터 타입이 자동으로 최적화되어 메모리 사용량이 줄어듭니다",
+        "🔹 **병렬 처리**: CPU 코어 수에 따라 자동으로 병렬 처리가 적용됩니다",
+        "🔹 **캐시 활용**: 기술적 지표 계산 결과가 캐시되어 재사용됩니다",
+        "🔹 **성능 모니터링**: 모든 연산의 성능이 자동으로 모니터링되고 로그에 기록됩니다"
+    ]
+    
+    for rec in recommendations:
+        st.markdown(rec)
+    
+    st.info("""
+    ⚡ **성능 최적화 팁:**
+    - 워커 수는 CPU 코어 수의 75% 정도가 적당합니다
+    - 청크 크기는 메모리 용량에 따라 조정하세요 (기본: 10,000행)
+    - 정기적으로 성능 분석을 실행하여 병목 지점을 파악하세요
+    """)
 
 if __name__ == "__main__":
     show_page() 

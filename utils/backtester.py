@@ -6,18 +6,19 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from typing import Dict, Any, Optional, List, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
 class Backtester:
     """백테스팅 클래스"""
     
-    def __init__(self, settings):
+    def __init__(self, settings: Dict[str, Any]) -> None:
         self.settings = settings
         self.portfolio_history = []
         self.trade_history = []
     
-    def construct_portfolio(self, data, mega_alpha):
+    def construct_portfolio(self, data: pd.DataFrame, mega_alpha: pd.DataFrame) -> Dict[str, Any]:
         """메가-알파를 기반으로 포트폴리오를 구성합니다."""
         portfolio = {}
         

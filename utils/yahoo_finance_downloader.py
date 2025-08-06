@@ -11,6 +11,7 @@ import streamlit as st
 from typing import List, Dict, Optional, Tuple
 import time
 import logging
+from utils.env_manager import get_api_key
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -19,14 +20,19 @@ logger = logging.getLogger(__name__)
 class YahooFinanceDownloader:
     """야후 파이낸스에서 주가 데이터를 다운로드하는 클래스"""
     
-    def __init__(self):
+    def __init__(self) -> None:
         """초기화"""
         self.session = None
         self._setup_session()
     
-    def _setup_session(self):
+    def _setup_session(self) -> None:
         """yfinance 세션 설정"""
         try:
+            # API 키 확인
+            self.api_key = get_api_key('yahoo_finance')
+            if self.api_key:
+                logger.info("Yahoo Finance API 키가 설정되었습니다.")
+            
             # yfinance 세션 설정 (재시도 및 타임아웃 설정)
             import requests
             session = requests.Session()
@@ -34,7 +40,13 @@ class YahooFinanceDownloader:
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             })
             
-            # yfinance에 세션 적용 (pdr_override는 pandas_datareader의 함수이므로 제거)
+            # API 키가 있으면 헤더에 추가
+            if self.api_key:
+                session.headers.update({
+                    'X-API-Key': self.api_key
+                })
+            
+            # yfinance에 세션 적용
             self.session = session
             
         except Exception as e:
