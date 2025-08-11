@@ -17,11 +17,47 @@ warnings.filterwarnings('ignore')
 class FactorMiner:
     """팩터 마이닝 클래스"""
     
-    def __init__(self, settings: Dict[str, Any]) -> None:
+    def __init__(self, settings: Optional[Dict[str, Any]] = None) -> None:
+        # 기본 설정 제공
+        if settings is None:
+            settings = {
+                'factor_types': ['Momentum', 'Value', 'Quality', 'Size', 'Low Volatility'],
+                'factor_pool_size': 10,
+                'min_ic': 0.02,
+                'min_icir': 0.5,
+                'learning_rate': 0.001,
+                'epochs': 100,
+                'hidden_size': 64,
+                'dropout_rate': 0.2
+            }
+        
         self.settings = settings
         self.scaler = StandardScaler()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
+    
+    def generate_factors(self, data: pd.DataFrame, n_factors: int = 5) -> List[Dict[str, Any]]:
+        """팩터를 생성합니다."""
+        try:
+            # 기본 팩터 생성
+            basic_factors = self.generate_basic_factors(data)
+            
+            # AI 팩터 생성
+            ai_factors = self.generate_ai_factors(data, basic_factors)
+            
+            # 전체 팩터에서 n_factors개 선택
+            all_factors = basic_factors + ai_factors
+            selected_factors = all_factors[:n_factors]
+            
+            return selected_factors
+            
+        except Exception as e:
+            print(f"ERROR in generate_factors: {str(e)}")
+            # 에러 발생 시 기본 팩터만 반환
+            try:
+                return self.generate_basic_factors(data)[:n_factors]
+            except:
+                return []
+    
     def generate_basic_factors(self, data: pd.DataFrame) -> List[Dict[str, Any]]:
         """기본 팩터들을 생성합니다."""
         try:
@@ -249,8 +285,7 @@ class FactorMiner:
     
     def _create_neural_network(self, input_size: int) -> nn.Module:
         """신경망 모델을 생성합니다."""
-        hidden_size = self.settings['neurons_per_layer']
-        num_layers = self.settings['hidden_layers']
+        hidden_size = self.settings['hidden_size']
         
         layers = []
         
@@ -259,11 +294,10 @@ class FactorMiner:
         layers.append(nn.ReLU())
         layers.append(nn.Dropout(self.settings['dropout_rate']))
         
-        # 은닉층
-        for _ in range(num_layers - 1):
-            layers.append(nn.Linear(hidden_size, hidden_size))
-            layers.append(nn.ReLU())
-            layers.append(nn.Dropout(self.settings['dropout_rate']))
+        # 은닉층 (단일 레이어)
+        layers.append(nn.Linear(hidden_size, hidden_size))
+        layers.append(nn.ReLU())
+        layers.append(nn.Dropout(self.settings['dropout_rate']))
         
         # 출력층
         layers.append(nn.Linear(hidden_size, 1))

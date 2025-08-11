@@ -944,8 +944,57 @@ def create_sample_data():
     if (df['Close'] <= 0).any():
         raise ValueError("음수 또는 0 가격이 발견되었습니다")
     
+    # AI 팩터에 필요한 추가 컬럼 생성
+    df = add_technical_indicators(df)
+    
     print(f"샘플 데이터 생성 완료: {len(df)} 행, {df['Ticker'].nunique()} 종목")
     return df
+
+def add_technical_indicators(df):
+    """기술적 지표 컬럼들을 추가합니다."""
+    # 종목별로 그룹화하여 계산
+    result_data = []
+    
+    for ticker in df['Ticker'].unique():
+        ticker_data = df[df['Ticker'] == ticker].copy().sort_values('Date').reset_index(drop=True)
+        
+        # 수익률 계산
+        ticker_data['Returns'] = ticker_data['Close'].pct_change()
+        
+        # 20일 변동성
+        ticker_data['Volatility_20d'] = ticker_data['Returns'].rolling(window=20).std()
+        
+        # RSI (14일)
+        delta = ticker_data['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        ticker_data['RSI'] = 100 - (100 / (1 + rs))
+        
+        # MACD (12, 26, 9)
+        ema12 = ticker_data['Close'].ewm(span=12).mean()
+        ema26 = ticker_data['Close'].ewm(span=26).mean()
+        ticker_data['MACD'] = ema12 - ema26
+        
+        # 볼린저 밴드 (20일, 2표준편차)
+        bb_20 = ticker_data['Close'].rolling(window=20).mean()
+        bb_std = ticker_data['Close'].rolling(window=20).std()
+        bb_upper = bb_20 + (bb_std * 2)
+        bb_lower = bb_20 - (bb_std * 2)
+        ticker_data['BB_Position'] = (ticker_data['Close'] - bb_lower) / (bb_upper - bb_lower)
+        ticker_data['BB_Width'] = bb_upper - bb_lower
+        
+        # 결과 데이터에 추가
+        result_data.append(ticker_data)
+    
+    # 모든 종목 데이터를 합치기
+    if result_data:
+        enhanced_df = pd.concat(result_data, ignore_index=True)
+        # NaN 값 처리
+        enhanced_df = enhanced_df.fillna(0)
+        return enhanced_df
+    else:
+        return df
 
 def calculate_basic_stats(data):
     """기본 통계를 계산합니다."""
