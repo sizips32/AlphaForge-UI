@@ -40,11 +40,17 @@ def sample_stock_data():
             new_price = max(prices[-1] + change, 10)  # 최소 10달러
             prices.append(new_price)
         
-        # OHLCV 데이터 생성
+        # OHLCV 데이터 생성 (올바른 OHLC 관계 보장)
         for i, (date, close) in enumerate(zip(business_days, prices)):
-            high = close * np.random.uniform(1.0, 1.05)
-            low = close * np.random.uniform(0.95, 1.0)
-            open_price = close * np.random.uniform(0.98, 1.02)
+            # OHLC 관계를 올바르게 생성
+            open_price = close * np.random.uniform(0.95, 1.05)
+            high = max(open_price, close) * np.random.uniform(1.0, 1.03)
+            low = min(open_price, close) * np.random.uniform(0.97, 1.0)
+            
+            # OHLC 관계 검증 및 수정
+            high = max(high, open_price, close)
+            low = min(low, open_price, close)
+            
             volume = np.random.randint(1000000, 10000000)
             
             data_list.append({

@@ -148,7 +148,7 @@ class FactorMiner:
         # 가격 모멘텀
         for period in [5, 10, 20, 60]:
             factor_name = f"Momentum_{period}d"
-            factor_values = data.groupby('Ticker')['Close'].pct_change(period)
+            factor_values = data.groupby('Ticker', observed=False)['Close'].pct_change(period)
             factors.append({
                 'name': factor_name,
                 'values': factor_values,
@@ -160,7 +160,7 @@ class FactorMiner:
         if 'Volume' in data.columns:
             for period in [5, 10, 20]:
                 factor_name = f"Volume_Momentum_{period}d"
-                factor_values = data.groupby('Ticker')['Volume'].pct_change(period)
+                factor_values = data.groupby('Ticker', observed=False)['Volume'].pct_change(period)
                 factors.append({
                     'name': factor_name,
                     'values': factor_values,
@@ -234,7 +234,7 @@ class FactorMiner:
         # 거래량 기반 사이즈
         if 'Volume' in data.columns:
             factor_name = "Size_Volume_Rank"
-            factor_values = data.groupby('Date')['Volume'].rank(pct=True)
+            factor_values = data.groupby('Date', observed=False)['Volume'].rank(pct=True)
             factors.append({
                 'name': factor_name,
                 'values': factor_values,
@@ -393,4 +393,79 @@ class FactorMiner:
                 'formula': f'AI_Model_Output_{i+1}'
             })
         
-        return basic_factors + ai_factors 
+        return basic_factors + ai_factors
+    
+    def _calculate_factor_performance(self, factor_values: pd.Series, returns: pd.Series) -> Tuple[float, float, float]:
+        """팩터 성능을 계산합니다."""
+        try:
+            # 데이터 정리 및 타입 변환
+            if isinstance(factor_values, np.ndarray):
+                factor_values = pd.Series(factor_values)
+            if isinstance(returns, np.ndarray):
+                returns = pd.Series(returns)
+            
+            factor_values = factor_values.fillna(0)
+            returns = returns.fillna(0)
+            
+            # 공통 인덱스 사용
+            common_index = factor_values.index.intersection(returns.index)
+            if len(common_index) < 10:  # 최소 데이터 포인트
+                return 0.0, 0.0, 0.0
+            
+            factor_values = factor_values.loc[common_index]
+            returns = returns.loc[common_index]
+            
+            # IC (Information Coefficient) 계산
+            ic = factor_values.corr(returns)
+            if pd.isna(ic):
+                ic = 0.0
+            
+            # ICIR (Information Coefficient Information Ratio) 계산
+            if len(common_index) > 20:
+                # 롤링 IC 계산
+                rolling_ic = factor_values.rolling(20).corr(returns)
+                ic_std = rolling_ic.std()
+                icir = ic / (ic_std + 1e-8) if ic_std > 0 else 0.0
+            else:
+                icir = 0.0
+            
+            # Hit Rate 계산
+            # 팩터 값이 양수일 때 수익률도 양수인 비율
+            positive_factor = factor_values > 0
+            positive_returns = returns > 0
+            hit_rate = (positive_factor & positive_returns).sum() / (positive_factor.sum() + 1e-8)
+            
+            return float(ic), float(icir), float(hit_rate)
+            
+        except Exception as e:
+            print(f"ERROR in _calculate_factor_performance: {str(e)}")
+            return 0.0, 0.0, 0.0
+    
+    def _filter_factors_by_performance(self, factors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """성과 기준으로 팩터를 필터링합니다."""
+        try:
+            filtered_factors = []
+            
+            for factor in factors:
+                # 성과 지표가 있는지 확인
+                if 'ic' not in factor or 'icir' not in factor:
+                    continue
+                
+                # 설정된 임계값과 비교
+                ic = factor.get('ic', 0.0)
+                icir = factor.get('icir', 0.0)
+                
+                if (ic >= self.settings.get('min_ic', 0.02) and 
+                    icir >= self.settings.get('min_icir', 0.5)):
+                    filtered_factors.append(factor)
+            
+            # IC 기준으로 정렬
+            filtered_factors.sort(key=lambda x: x.get('ic', 0.0), reverse=True)
+            
+            # 최대 팩터 수 제한
+            max_factors = self.settings.get('factor_pool_size', 10)
+            return filtered_factors[:max_factors]
+            
+        except Exception as e:
+            print(f"ERROR in _filter_factors_by_performance: {str(e)}")
+            return factors[:self.settings.get('factor_pool_size', 10)] 

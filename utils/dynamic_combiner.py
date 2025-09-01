@@ -117,7 +117,25 @@ class DynamicCombiner:
                 })
             
             # 현재 가중치 적용
-            weights.loc[date] = optimal_weights
+            try:
+                if isinstance(optimal_weights, dict):
+                    # 딕셔너리 형태의 가중치를 DataFrame에 할당
+                    for factor_name in factor_df.columns:
+                        if factor_name in optimal_weights:
+                            weights.loc[date, factor_name] = float(optimal_weights[factor_name])
+                        else:
+                            weights.loc[date, factor_name] = 0.0
+                else:
+                    # 기타 형태의 가중치는 기본값 사용
+                    for factor_name in factor_df.columns:
+                        weights.loc[date, factor_name] = 0.0
+            except Exception as e:
+                print(f"WARNING: Failed to assign weights for date {date}: {str(e)}")
+                # 에러 발생 시 등가중치 사용
+                n_factors = len(factor_df.columns)
+                equal_weight = 1.0 / n_factors if n_factors > 0 else 0.0
+                for factor_name in factor_df.columns:
+                    weights.loc[date, factor_name] = equal_weight
         
         return weights
     
@@ -126,7 +144,7 @@ class DynamicCombiner:
         performance = {}
         
         # 수익률 계산
-        returns = price_data.groupby('Ticker')['Close'].pct_change()
+        returns = price_data.groupby('Ticker', observed=False)['Close'].pct_change()
         
         for factor_name in factor_data.columns:
             factor_values = factor_data[factor_name]
@@ -415,34 +433,75 @@ class DynamicCombiner:
                             factor_value = factor_df.loc[date, factor_name]
                             
                             # 스칼라 값으로 변환하여 계산
-                            if not pd.isna(factor_value).any() and not pd.isna(weight).any():
+                            try:
+                                if pd.isna(factor_value) or pd.isna(weight):
+                                    continue
+                                
+                                # factor_value 타입 검사 및 변환
                                 if isinstance(factor_value, (list, np.ndarray)):
                                     # 배열인 경우 평균값 사용
-                                    factor_value = np.mean(factor_value) if len(factor_value) > 0 else 0.0
+                                    if len(factor_value) > 0:
+                                        factor_value = float(np.mean(factor_value))
+                                    else:
+                                        factor_value = 0.0
                                 elif isinstance(factor_value, pd.Series):
                                     # Series인 경우 평균값 사용
-                                    factor_value = factor_value.mean() if len(factor_value) > 0 else 0.0
+                                    if len(factor_value) > 0:
+                                        factor_value = float(factor_value.mean())
+                                    else:
+                                        factor_value = 0.0
+                                elif isinstance(factor_value, (int, float)):
+                                    factor_value = float(factor_value)
+                                else:
+                                    # 기타 타입은 0으로 처리
+                                    factor_value = 0.0
                                 
-                                # 스칼라 값으로 변환
-                                weight = float(weight)
-                                factor_value = float(factor_value)
+                                # weight 타입 검사 및 변환
+                                if isinstance(weight, (list, np.ndarray)):
+                                    weight = float(np.mean(weight)) if len(weight) > 0 else 0.0
+                                elif isinstance(weight, pd.Series):
+                                    weight = float(weight.mean()) if len(weight) > 0 else 0.0
+                                else:
+                                    weight = float(weight)
                                 
                                 current_value += weight * factor_value
+                                
+                            except (ValueError, TypeError) as e:
+                                print(f"WARNING: Factor {factor_name} at {date} has invalid value: {factor_value}, type: {type(factor_value)}")
+                                continue
                 else:
                     # 가중치가 없는 날짜는 등가중치 사용
                     n_factors = len(factor_df.columns)
                     equal_weight = 1.0 / n_factors if n_factors > 0 else 0.0
                     
                     for factor_name in factor_df.columns:
-                        factor_value = factor_df.loc[date, factor_name]
-                        if not pd.isna(factor_value).any():
-                            if isinstance(factor_value, (list, np.ndarray)):
-                                factor_value = np.mean(factor_value) if len(factor_value) > 0 else 0.0
-                            elif isinstance(factor_value, pd.Series):
-                                factor_value = factor_value.mean() if len(factor_value) > 0 else 0.0
+                        try:
+                            factor_value = factor_df.loc[date, factor_name]
                             
-                            factor_value = float(factor_value)
+                            if pd.isna(factor_value):
+                                continue
+                            
+                            # factor_value 타입 검사 및 변환
+                            if isinstance(factor_value, (list, np.ndarray)):
+                                if len(factor_value) > 0:
+                                    factor_value = float(np.mean(factor_value))
+                                else:
+                                    factor_value = 0.0
+                            elif isinstance(factor_value, pd.Series):
+                                if len(factor_value) > 0:
+                                    factor_value = float(factor_value.mean())
+                                else:
+                                    factor_value = 0.0
+                            elif isinstance(factor_value, (int, float)):
+                                factor_value = float(factor_value)
+                            else:
+                                factor_value = 0.0
+                            
                             current_value += equal_weight * factor_value
+                            
+                        except (ValueError, TypeError) as e:
+                            print(f"WARNING: Factor {factor_name} at {date} has invalid value: {factor_value}, type: {type(factor_value)}")
+                            continue
                 
                 # 최종 값을 할당
                 mega_alpha.loc[date] = current_value
@@ -457,7 +516,7 @@ class DynamicCombiner:
     def _calculate_performance_metrics(self, mega_alpha, data):
         """메가-알파의 성과 지표를 계산합니다."""
         # 수익률 계산
-        returns = data.groupby('Ticker')['Close'].pct_change()
+        returns = data.groupby('Ticker', observed=False)['Close'].pct_change()
         
         # IC 계산
         ic = self._calculate_rolling_ic(mega_alpha, returns, mega_alpha.index[-1])
@@ -536,7 +595,7 @@ class DynamicCombiner:
     def _calculate_cumulative_returns(self, mega_alpha, data):
         """누적 수익률을 계산합니다."""
         try:
-            returns = data.groupby('Ticker')['Close'].pct_change()
+            returns = data.groupby('Ticker', observed=False)['Close'].pct_change()
             alpha_ranks = mega_alpha.rank(pct=True)
             positions = np.where(alpha_ranks > 0.7, 1, np.where(alpha_ranks < 0.3, -1, 0))
             portfolio_returns = positions * returns
@@ -551,7 +610,7 @@ class DynamicCombiner:
     def _calculate_monthly_returns(self, mega_alpha, data):
         """월별 수익률을 계산합니다."""
         try:
-            returns = data.groupby('Ticker')['Close'].pct_change()
+            returns = data.groupby('Ticker', observed=False)['Close'].pct_change()
             alpha_ranks = mega_alpha.rank(pct=True)
             positions = np.where(alpha_ranks > 0.7, 1, np.where(alpha_ranks < 0.3, -1, 0))
             portfolio_returns = positions * returns

@@ -80,7 +80,7 @@ class TestFactorMiner:
         miner = FactorMiner(factor_settings)
         
         # 단순한 모멘텀 팩터 생성
-        factor_values = processed_data.groupby('Ticker')['Close'].pct_change(20).fillna(0)
+        factor_values = processed_data.groupby('Ticker', observed=False)['Close'].pct_change(20).fillna(0)
         
         ic, icir, hit_rate = miner._calculate_factor_performance(
             factor_values.values, 

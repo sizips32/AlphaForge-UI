@@ -111,36 +111,31 @@ class DataProcessor:
             if missing_columns:
                 raise ValueError(f"필수 컬럼이 누락되었습니다: {missing_columns}")
             
-            # 메모리 최적화 적용
-            processed = performance_optimizer.optimize_dataframe_memory(data.copy())
+            # 1. 기본 정리
+            processed = self._clean_data(data.copy())
+            
+            # 2. 날짜 처리 (메모리 최적화 전에 수행)
+            processed = self._process_dates(processed)
+            
+            # 3. 가격 데이터 처리
+            processed = self._process_prices(processed)
+            
+            # 4. 거래량 처리
+            processed = self._process_volume(processed)
+            
+            # 5. 메모리 최적화 적용 (날짜 처리 후)
+            processed = performance_optimizer.optimize_dataframe_memory(processed)
             
             # 대용량 데이터 처리를 위한 최적화된 프로세싱
             if len(processed) > 100000:  # 10만 행 이상일 때 청크 처리
                 # 청크별로 전처리 수행
                 def process_chunk(chunk_data: pd.DataFrame) -> pd.DataFrame:
-                    # 1. 기본 정리
-                    chunk_data = self._clean_data(chunk_data)
-                    # 2. 날짜 처리
-                    chunk_data = self._process_dates(chunk_data)
-                    # 3. 가격 데이터 처리
-                    chunk_data = self._process_prices(chunk_data)
-                    # 4. 거래량 처리
-                    chunk_data = self._process_volume(chunk_data)
+                    # 청크별 추가 처리 (이미 기본 처리는 완료됨)
                     return chunk_data
                 
                 processed = performance_optimizer.chunked_processing(
                     processed, process_chunk, chunk_size=50000
                 )
-            else:
-                # 일반 처리
-                # 1. 기본 정리
-                processed = self._clean_data(processed)
-                # 2. 날짜 처리
-                processed = self._process_dates(processed)
-                # 3. 가격 데이터 처리
-                processed = self._process_prices(processed)
-                # 4. 거래량 처리
-                processed = self._process_volume(processed)
             
             # 5. 기술적 지표 계산 (이미 최적화됨)
             from utils.cache_utils import get_data_hash
@@ -218,7 +213,7 @@ class DataProcessor:
         """날짜 데이터를 처리합니다."""
         try:
             if 'Date' in data.columns:
-                # 날짜 형식 변환
+                # 날짜 형식 변환 및 카테고리형 해제
                 data['Date'] = pd.to_datetime(data['Date'], errors='coerce')
                 
                 # 변환 실패한 날짜 확인
@@ -231,18 +226,22 @@ class DataProcessor:
                 # 날짜 정렬
                 data = data.sort_values(['Date', 'Ticker']).reset_index(drop=True)
                 
-                # 미래 날짜 제거
+                # 미래 날짜 제거 (안전한 비교를 위해 numpy 배열로 변환)
                 current_date = pd.Timestamp.now()
-                future_dates = data[data['Date'] > current_date]
+                date_array = data['Date'].values
+                future_mask = date_array > current_date
+                future_dates = data[future_mask]
                 if len(future_dates) > 0:
                     print(f"WARNING: {len(future_dates)}개의 미래 날짜 제거")
-                    data = data[data['Date'] <= current_date]
+                    data = data[~future_mask]
                 
                 # 주말 데이터 제거 (선택사항)
-                weekend_data = data[data['Date'].dt.weekday >= 5]
+                weekday_array = data['Date'].dt.weekday.values
+                weekend_mask = weekday_array >= 5
+                weekend_data = data[weekend_mask]
                 if len(weekend_data) > 0:
                     print(f"WARNING: {len(weekend_data)}개의 주말 데이터 제거")
-                    data = data[data['Date'].dt.weekday < 5]
+                    data = data[~weekend_mask]
                 
                 # 날짜 인덱스 생성
                 data['year'] = data['Date'].dt.year
@@ -269,7 +268,7 @@ class DataProcessor:
                 
                 # 0 값 처리 (전일 종가로 대체)
                 if col != 'Open':
-                    data[col] = data.groupby('Ticker')[col].ffill()
+                    data[col] = data.groupby('Ticker', observed=False)[col].ffill()
         
         # OHLC 관계 검증 및 수정
         if all(col in data.columns for col in price_columns):
@@ -285,11 +284,11 @@ class DataProcessor:
             data['Volume'] = data['Volume'].abs()
             
             # 0 거래량 처리
-            data['Volume'] = data.groupby('Ticker')['Volume'].ffill()
+            data['Volume'] = data.groupby('Ticker', observed=False)['Volume'].ffill()
             
             # 거래량 이동평균
-            data['Volume_MA5'] = data.groupby('Ticker')['Volume'].rolling(5).mean().reset_index(0, drop=True)
-            data['Volume_MA20'] = data.groupby('Ticker')['Volume'].rolling(20).mean().reset_index(0, drop=True)
+            data['Volume_MA5'] = data.groupby('Ticker', observed=False)['Volume'].rolling(5).mean().reset_index(0, drop=True)
+            data['Volume_MA20'] = data.groupby('Ticker', observed=False)['Volume'].rolling(20).mean().reset_index(0, drop=True)
         
         return data
     
@@ -435,26 +434,49 @@ class DataProcessor:
     
     def _calculate_factors(self, data):
         """기본 팩터들을 계산합니다."""
+        # 성능 최적화를 위해 모든 계산을 먼저 수행하고 한 번에 추가
+        new_columns = {}
+        
+        # 필요한 이동평균을 직접 계산
+        new_columns['MA20'] = data.groupby('Ticker', observed=False)['Close'].rolling(20).mean().reset_index(0, drop=True)
+        new_columns['MA50'] = data.groupby('Ticker', observed=False)['Close'].rolling(50).mean().reset_index(0, drop=True)
+        new_columns['MA200'] = data.groupby('Ticker', observed=False)['Close'].rolling(200).mean().reset_index(0, drop=True)
+        
         # 모멘텀 팩터
-        data['Momentum_1M'] = data.groupby('Ticker')['Close'].pct_change(20)
-        data['Momentum_3M'] = data.groupby('Ticker')['Close'].pct_change(60)
-        data['Momentum_6M'] = data.groupby('Ticker')['Close'].pct_change(120)
+        new_columns['Momentum_1M'] = data.groupby('Ticker', observed=False)['Close'].pct_change(20)
+        new_columns['Momentum_3M'] = data.groupby('Ticker', observed=False)['Close'].pct_change(60)
+        new_columns['Momentum_6M'] = data.groupby('Ticker', observed=False)['Close'].pct_change(120)
         
         # 밸류 팩터 (P/E 대신 가격 대비 이동평균 비율 사용)
-        data['Value_MA20'] = data['Close'] / data['MA20']
-        data['Value_MA50'] = data['Close'] / data['MA50']
-        data['Value_MA200'] = data['Close'] / data['MA200']
+        new_columns['Value_MA20'] = data['Close'] / (new_columns['MA20'] + 1e-8)
+        new_columns['Value_MA50'] = data['Close'] / (new_columns['MA50'] + 1e-8)
+        new_columns['Value_MA200'] = data['Close'] / (new_columns['MA200'] + 1e-8)
         
         # 퀄리티 팩터 (변동성의 역수)
-        data['Quality_LowVol'] = 1 / (data['Volatility_20d'] + 1e-8)
-        data['Quality_Stability'] = 1 / (data['Volatility_60d'] + 1e-8)
+        if 'Volatility_20d' in data.columns:
+            new_columns['Quality_LowVol'] = 1 / (data['Volatility_20d'] + 1e-8)
+        else:
+            # Volatility_20d가 없으면 직접 계산
+            new_columns['Volatility_20d'] = data.groupby('Ticker', observed=False)['Close'].pct_change().rolling(20).std().reset_index(0, drop=True)
+            new_columns['Quality_LowVol'] = 1 / (new_columns['Volatility_20d'] + 1e-8)
+        
+        if 'Volatility_60d' in data.columns:
+            new_columns['Quality_Stability'] = 1 / (data['Volatility_60d'] + 1e-8)
+        else:
+            # Volatility_60d가 없으면 직접 계산
+            new_columns['Volatility_60d'] = data.groupby('Ticker', observed=False)['Close'].pct_change().rolling(60).std().reset_index(0, drop=True)
+            new_columns['Quality_Stability'] = 1 / (new_columns['Volatility_60d'] + 1e-8)
         
         # 사이즈 팩터 (거래량 기반)
         if 'Volume' in data.columns:
-            data['Size_Volume'] = data.groupby('Date')['Volume'].rank(pct=True)
+            new_columns['Size_Volume'] = data.groupby('Date', observed=False)['Volume'].rank(pct=True)
         
         # 저변동성 팩터
-        data['LowVolatility'] = -data['Volatility_20d']
+        new_columns['LowVolatility'] = -new_columns['Volatility_20d']
+        
+        # 모든 새 컬럼을 한 번에 추가 (성능 최적화)
+        new_df = pd.DataFrame(new_columns, index=data.index)
+        data = pd.concat([data, new_df], axis=1)
         
         return data
     
